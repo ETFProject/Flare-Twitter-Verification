@@ -17,7 +17,13 @@ const HAS_TWITTER_CONFIG = !!process.env.TWITTER_BEARER_TOKEN;
 
 // Option to force real services (set FORCE_REAL_SERVICES=true to fail if config missing)
 const FORCE_REAL_SERVICES = process.env.FORCE_REAL_SERVICES === 'true';
-const USE_MOCK_SERVICES = FORCE_REAL_SERVICES ? false : (!HAS_FLARE_CONFIG || !HAS_TWITTER_CONFIG);
+const USE_MOCK_SERVICES = process.env.USE_MOCK_SERVICES === 'true' || (!FORCE_REAL_SERVICES && (!HAS_FLARE_CONFIG || !HAS_TWITTER_CONFIG));
+
+console.log('🔧 Service Configuration:');
+console.log('   USE_MOCK_SERVICES:', USE_MOCK_SERVICES);
+console.log('   FORCE_REAL_SERVICES:', FORCE_REAL_SERVICES);
+console.log('   HAS_FLARE_CONFIG:', HAS_FLARE_CONFIG);
+console.log('   HAS_TWITTER_CONFIG:', HAS_TWITTER_CONFIG);
 
 if (FORCE_REAL_SERVICES && (!HAS_FLARE_CONFIG || !HAS_TWITTER_CONFIG)) {
   console.error('❌ FORCE_REAL_SERVICES=true but missing required configuration!');
@@ -121,7 +127,7 @@ class FlareService {
         console.log('✅ Flare RPC provider initialized successfully');
         console.log('🌐 Network:', {
           chainId: network.chainId.toString(),
-          name: network.name
+          name: network.chainId.toString() === '114' ? 'C2FLR' : network.name
         });
       }
     } catch (error) {
@@ -184,10 +190,11 @@ class FlareService {
         hasAuthHeader: !!process.env.TWITTER_BEARER_TOKEN
       });
 
-      // Send request to verifier
+      // Send request to verifier with exact headers from working example
       const response = await fetch(`${process.env.WEB2JSON_VERIFIER_URL_TESTNET}Web2Json/prepareRequest`, {
         method: 'POST',
         headers: {
+          'accept': 'application/json',
           'X-API-KEY': process.env.VERIFIER_API_KEY_TESTNET,
           'Content-Type': 'application/json'
         },
@@ -606,6 +613,43 @@ class TwitterService {
 
 // Mock Services (existing implementation for fallback)
 class MockFlareService {
+  static async prepareAttestationRequest(data) {
+    console.log('📝 Preparing mock attestation request:', data);
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Return a mock ABI encoded request that matches the real service format
+    const mockRequest = {
+      attestationType: "0x576562324a736f6e000000000000000000000000000000000000000000000000",
+      sourceId: "0x5075626c69635765623200000000000000000000000000000000000000000000",
+      requestBody: {
+        url: `https://api.twitter.com/2/users/by/username/${data.twitterHandle}`,
+        httpMethod: 'GET',
+        headers: JSON.stringify({
+          'Authorization': `Bearer ${process.env.TWITTER_BEARER_TOKEN || 'mock_token'}`
+        }),
+        queryParams: '{}',
+        body: '{}',
+        postProcessJq: '{username: (.data.username // ""), name: (.data.name // ""), description: (.data.description // ""), verified: (.data.verified // false), followers_count: (.data.public_metrics.followers_count // 0), following_count: (.data.public_metrics.following_count // 0), location: (.data.location // "")}',
+        abiSignature: JSON.stringify({
+          components: [
+            {internalType: "string", name: "username", type: "string"},
+            {internalType: "string", name: "name", type: "string"},
+            {internalType: "string", name: "description", type: "string"},
+            {internalType: "bool", name: "verified", type: "bool"},
+            {internalType: "uint256", name: "followers_count", type: "uint256"},
+            {internalType: "uint256", name: "following_count", type: "uint256"},
+            {internalType: "string", name: "location", type: "string"}
+          ],
+          name: "TwitterProfile",
+          type: "tuple"
+        })
+      }
+    };
+    
+    return JSON.stringify(mockRequest);
+  }
+
   static async submitAttestation(data) {
     console.log('📡 Submitting mock attestation to Flare FDC:', data);
     
@@ -703,36 +747,31 @@ class MockTwitterService {
 
   static async getUserProfile(handle) {
     console.log('👤 Fetching mock user profile for:', handle);
-    
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 600));
-    
-    const profiles = [
-      {
-        screen_name: handle,
-        name: 'Verified User',
-        description: 'Crypto enthusiast and AI ETF investor. Verification code: ABC12345',
-        verified: true,
-        followers_count: 2830,
-        following_count: 445,
-        location: 'San Francisco, CA'
-      },
-      {
-        screen_name: handle,
-        name: 'DeFi Trader',
-        description: 'Building the future of decentralized finance. Portfolio verification: XYZ67890',
-        verified: false,
-        followers_count: 892,
-        following_count: 1205,
-        location: 'New York, NY'
+    // Try to find a pending verification code for this handle
+    let code = '';
+    if (typeof bioVerifications !== 'undefined') {
+      for (const [key, verification] of bioVerifications.entries()) {
+        if (key.includes(handle.toLowerCase())) {
+          code = verification.verificationCode;
+          break;
+        }
       }
-    ];
-    
-    const profile = profiles[Math.floor(Math.random() * profiles.length)];
-    profile.screen_name = handle; // Ensure handle matches
-    
+    }
+    const description = code
+      ? `Mock bio with verification code: ${code}`
+      : 'Mock user profile for testing.';
+    const profile = {
+      screen_name: handle,
+      name: 'Mock User',
+      description,
+      verified: false,
+      followers_count: 100,
+      following_count: 50,
+      location: 'Test Location'
+    };
     console.log('✅ Mock user profile retrieved:', profile.name);
-    
     return profile;
   }
 }

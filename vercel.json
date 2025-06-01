@@ -23,6 +23,7 @@
     }
   ],
   "env": {
-    "NODE_ENV": "production"
+    "NODE_ENV": "production",
+    "USE_MOCK_SERVICES": "true"
   }
 } 
